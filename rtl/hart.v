@@ -163,20 +163,23 @@ module hart #(
 
     wire [31:0] wb_data;
 
-    // BLTU/BGEU (funct3[1]=1) need unsigned comparison — reads from IF/ID reg
+    // BLTU/BGEU (funct3[1]=1), read from IF/ID reg
     wire alu_unsigned_final = dec_alu_unsigned | (dec_branch & ifid_inst[13]);
+
+    // Flush 
+    wire flush = exe_pc_set & ~exe_target_misaligned;
 
     // Pipeline registers
 
     // IF/ID pipeline register
     reg [31:0] ifid_pc, ifid_inst;
     always @(posedge i_clk) begin
-        if (i_rst) begin
-            ifid_pc   <= RESET_ADDR;
+        if (i_rst || flush) begin
+            ifid_pc   <= 32'd0;
             // NOP
-            ifid_inst <= 32'h00000013; 
+            ifid_inst <= 32'h00000013;
         end else begin
-            ifid_pc   <= fetch_pc;
+            ifid_pc <= fetch_pc;
             ifid_inst <= fetch_inst;
         end
     end
@@ -225,6 +228,36 @@ module hart #(
             idex_branch_op <= 3'd0;         
             idex_halt <= 1'b0;
             idex_trap <= 1'b0;         
+            idex_uses_rs1 <= 1'b0;
+            idex_uses_rs2 <= 1'b0;
+        end else if (flush) begin
+            // Insert bubble, clear all control signals
+            idex_pc <= ifid_pc;
+            // NOP
+            idex_inst <= 32'h00000013; 
+            idex_rs1_addr <= 5'd0;
+            idex_rs2_addr <= 5'd0;
+            idex_rd_addr <= 5'd0;
+            idex_rs1_data <= 32'd0;
+            idex_rs2_data <= 32'd0;
+            idex_immediate <= 32'd0;
+            idex_alu_op <= 3'd0;
+            idex_alu_sub <= 1'b0;
+            idex_alu_unsigned <= 1'b0;
+            idex_alu_arith <= 1'b0;
+            idex_alu_src <= 1'b0;
+            idex_alu_pc <= 1'b0;
+            idex_mem_ren <= 1'b0;
+            idex_mem_wen <= 1'b0;
+            idex_mem_op <= 3'd0;
+            idex_wb_sel <= 2'd0;
+            idex_reg_wen <= 1'b0;
+            idex_branch <= 1'b0;
+            idex_jump <= 1'b0;
+            idex_is_jalr <= 1'b0;
+            idex_branch_op <= 3'd0;
+            idex_halt <= 1'b0;
+            idex_trap <= 1'b0;
             idex_uses_rs1 <= 1'b0;
             idex_uses_rs2 <= 1'b0;
         end else begin
