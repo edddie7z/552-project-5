@@ -162,14 +162,222 @@ module hart #(
     wire mem_misaligned;
 
     wire [31:0] wb_data;
-    wire [31:0] pc_plus4 = fetch_pc + 32'd4;
 
-    // BLTU/BGEU (funct3[1]=1) need unsigned comparison
-    wire alu_unsigned_final = dec_alu_unsigned | (dec_branch & fetch_inst[13]);
-    wire trap = dec_trap | (exe_pc_set & exe_target_misaligned) | mem_misaligned;
-    wire reg_wen_final = dec_reg_wen & ~trap;
-    wire mem_ren_final = dec_mem_ren & ~trap;
-    wire mem_wen_final = dec_mem_wen & ~trap;
+    // BLTU/BGEU (funct3[1]=1) need unsigned comparison — reads from IF/ID reg
+    wire alu_unsigned_final = dec_alu_unsigned | (dec_branch & ifid_inst[13]);
+
+    // Pipeline registers
+
+    // IF/ID pipeline register
+    reg [31:0] ifid_pc, ifid_inst;
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            ifid_pc   <= RESET_ADDR;
+            // NOP
+            ifid_inst <= 32'h00000013; 
+        end else begin
+            ifid_pc   <= fetch_pc;
+            ifid_inst <= fetch_inst;
+        end
+    end
+
+    // ID/EX pipeline register
+    reg [31:0] idex_pc, idex_inst;
+    reg [4:0] idex_rs1_addr, idex_rs2_addr, idex_rd_addr;
+    reg [31:0] idex_rs1_data, idex_rs2_data;
+    reg [31:0] idex_immediate;
+    reg [2:0] idex_alu_op;
+    reg idex_alu_sub, idex_alu_unsigned, idex_alu_arith;
+    reg idex_alu_src, idex_alu_pc;
+    reg idex_mem_ren, idex_mem_wen;
+    reg [2:0] idex_mem_op;
+    reg [1:0] idex_wb_sel;
+    reg idex_reg_wen;
+    reg idex_branch, idex_jump, idex_is_jalr;
+    reg [2:0] idex_branch_op;
+    reg idex_halt, idex_trap;
+    reg idex_uses_rs1, idex_uses_rs2;
+
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            idex_pc <= 32'd0;        
+            idex_inst <= 32'h00000013;
+            idex_rs1_addr <= 5'd0;         
+            idex_rs2_addr <= 5'd0;
+            idex_rd_addr <= 5'd0;
+            idex_rs1_data <= 32'd0;
+            idex_rs2_data <= 32'd0;        
+            idex_immediate <= 32'd0;
+            idex_alu_op <= 3'd0;         
+            idex_alu_sub <= 1'b0;
+            idex_alu_unsigned <= 1'b0;         
+            idex_alu_arith <= 1'b0;
+            idex_alu_src <= 1'b0;         
+            idex_alu_pc <= 1'b0;
+            idex_mem_ren <= 1'b0;         
+            idex_mem_wen <= 1'b0;
+            idex_mem_op <= 3'd0;         
+            idex_wb_sel <= 2'd0;
+            idex_reg_wen <= 1'b0;         
+            idex_branch <= 1'b0;
+            idex_jump <= 1'b0;         
+            idex_is_jalr <= 1'b0;
+            idex_branch_op <= 3'd0;         
+            idex_halt <= 1'b0;
+            idex_trap <= 1'b0;         
+            idex_uses_rs1 <= 1'b0;
+            idex_uses_rs2 <= 1'b0;
+        end else begin
+            idex_pc <= ifid_pc;          
+            idex_inst <= ifid_inst;
+            idex_rs1_addr <= dec_rs1_addr;     
+            idex_rs2_addr <= dec_rs2_addr;
+            idex_rd_addr <= dec_rd_addr;      
+            idex_rs1_data <= rs1_data;
+            idex_rs2_data <= rs2_data;         
+            idex_immediate <= immediate;
+            idex_alu_op <= dec_alu_op;       
+            idex_alu_sub <= dec_alu_sub;
+            idex_alu_unsigned <= alu_unsigned_final; 
+            idex_alu_arith <= dec_alu_arith;
+            idex_alu_src <= dec_alu_src;      
+            idex_alu_pc <= dec_alu_pc;
+            idex_mem_ren <= dec_mem_ren;      
+            idex_mem_wen <= dec_mem_wen;
+            idex_mem_op <= dec_mem_op;       
+            idex_wb_sel <= dec_wb_sel;
+            idex_reg_wen <= dec_reg_wen;      
+            idex_branch <= dec_branch;
+            idex_jump <= dec_jump;         
+            idex_is_jalr <= dec_is_jalr;
+            idex_branch_op <= dec_branch_op;    
+            idex_halt <= dec_halt;
+            idex_trap <= dec_trap;         
+            idex_uses_rs1 <= dec_uses_rs1;
+            idex_uses_rs2 <= dec_uses_rs2;
+        end
+    end
+
+    // EX/MEM pipeline register
+    reg [31:0] exmem_pc, exmem_inst;
+    reg [31:0] exmem_alu_result, exmem_branch_target;
+    reg exmem_pc_set;
+    reg [4:0] exmem_rs1_addr, exmem_rs2_addr, exmem_rd_addr;
+    reg [31:0] exmem_rs1_data, exmem_rs2_data;
+    reg [31:0] exmem_immediate, exmem_pc_plus4;
+    reg exmem_mem_ren, exmem_mem_wen;
+    reg [2:0] exmem_mem_op;
+    reg [1:0] exmem_wb_sel;
+    reg exmem_reg_wen;
+    reg exmem_halt, exmem_trap;
+    reg exmem_uses_rs1, exmem_uses_rs2;
+
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            exmem_pc <= 32'd0;
+            exmem_inst <= 32'h00000013;
+            exmem_alu_result <= 32'd0;
+            exmem_branch_target <= 32'd0;
+            exmem_pc_set <= 1'b0;
+            exmem_rs1_addr <= 5'd0;
+            exmem_rs2_addr <= 5'd0;
+            exmem_rd_addr <= 5'd0;
+            exmem_rs1_data <= 32'd0;
+            exmem_rs2_data <= 32'd0;
+            exmem_immediate <= 32'd0;
+            exmem_pc_plus4 <= 32'd0;
+            exmem_mem_ren <= 1'b0;
+            exmem_mem_wen <= 1'b0;
+            exmem_mem_op <= 3'd0;
+            exmem_wb_sel <= 2'd0;
+            exmem_reg_wen <= 1'b0;
+            exmem_halt <= 1'b0;
+            exmem_trap <= 1'b0;
+            exmem_uses_rs1 <= 1'b0;
+            exmem_uses_rs2 <= 1'b0;
+        end else begin
+            exmem_pc <= idex_pc;
+            exmem_inst <= idex_inst;
+            exmem_alu_result <= exe_alu_result;
+            exmem_branch_target <= exe_branch_target;
+            exmem_pc_set <= exe_pc_set;
+            exmem_rs1_addr <= idex_rs1_addr;
+            exmem_rs2_addr <= idex_rs2_addr;
+            exmem_rd_addr <= idex_rd_addr;
+            exmem_rs1_data <= idex_rs1_data;
+            exmem_rs2_data <= idex_rs2_data;
+            exmem_immediate <= idex_immediate;
+            exmem_pc_plus4 <= idex_pc + 32'd4;
+            exmem_mem_ren <= idex_mem_ren;
+            exmem_mem_wen <= idex_mem_wen;
+            exmem_mem_op <= idex_mem_op;
+            exmem_wb_sel <= idex_wb_sel;
+            exmem_reg_wen <= idex_reg_wen;
+            exmem_halt <= idex_halt;
+            exmem_trap <= idex_trap | (exe_pc_set & exe_target_misaligned);
+            exmem_uses_rs1 <= idex_uses_rs1;
+            exmem_uses_rs2 <= idex_uses_rs2;
+        end
+    end
+
+
+    // MEM/WB pipeline register
+    reg [31:0] memwb_pc, memwb_inst;
+    reg [31:0] memwb_alu_result, memwb_load_data;
+    reg [31:0] memwb_pc_plus4, memwb_immediate;
+    reg memwb_pc_set;
+    reg [31:0] memwb_branch_target;
+    reg [4:0] memwb_rs1_addr, memwb_rs2_addr, memwb_rd_addr;
+    reg [31:0] memwb_rs1_data, memwb_rs2_data;
+    reg [1:0] memwb_wb_sel;
+    reg memwb_reg_wen;
+    reg memwb_halt, memwb_trap;
+    reg memwb_uses_rs1, memwb_uses_rs2;
+
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            memwb_pc <= 32'd0;
+            memwb_inst <= 32'h00000013;
+            memwb_alu_result <= 32'd0;
+            memwb_load_data <= 32'd0;
+            memwb_pc_plus4 <= 32'd0;
+            memwb_immediate <= 32'd0;
+            memwb_pc_set <= 1'b0;
+            memwb_branch_target <= 32'd0;
+            memwb_rs1_addr <= 5'd0;
+            memwb_rs2_addr <= 5'd0;
+            memwb_rd_addr <= 5'd0;
+            memwb_rs1_data <= 32'd0;
+            memwb_rs2_data <= 32'd0;
+            memwb_wb_sel <= 2'd0;
+            memwb_reg_wen <= 1'b0;
+            memwb_halt <= 1'b0;
+            memwb_trap <= 1'b0;
+            memwb_uses_rs1 <= 1'b0;
+            memwb_uses_rs2 <= 1'b0;
+        end else begin
+            memwb_pc <= exmem_pc;
+            memwb_inst <= exmem_inst;
+            memwb_alu_result <= exmem_alu_result;
+            memwb_load_data <= mem_load_data;
+            memwb_pc_plus4 <= exmem_pc_plus4;
+            memwb_immediate <= exmem_immediate;
+            memwb_pc_set <= exmem_pc_set;
+            memwb_branch_target <= exmem_branch_target;
+            memwb_rs1_addr <= exmem_rs1_addr;
+            memwb_rs2_addr <= exmem_rs2_addr;
+            memwb_rd_addr <= exmem_rd_addr;
+            memwb_rs1_data <= exmem_rs1_data;
+            memwb_rs2_data <= exmem_rs2_data;
+            memwb_wb_sel <= exmem_wb_sel;
+            memwb_reg_wen <= exmem_reg_wen;
+            memwb_halt <= exmem_halt;
+            memwb_trap <= exmem_trap | mem_misaligned;
+            memwb_uses_rs1 <= exmem_uses_rs1;
+            memwb_uses_rs2 <= exmem_uses_rs2;
+        end
+    end
+    
 
     // Fetch stage
     fetch #(
@@ -178,7 +386,7 @@ module hart #(
         .i_clk(i_clk),
         .i_rst(i_rst),
         .i_stall(1'b0),
-        .i_pc_set(exe_pc_set & ~trap),
+        .i_pc_set(exe_pc_set & ~exe_target_misaligned),
         .i_pc_next(exe_branch_target),
         .o_imem_raddr(o_imem_raddr),
         .i_imem_rdata(i_imem_rdata),
@@ -189,7 +397,7 @@ module hart #(
 
     // Decode stage
     decode ID (
-        .i_inst(fetch_inst),
+        .i_inst(ifid_inst),
         .o_rs1_addr(dec_rs1_addr),
         .o_rs2_addr(dec_rs2_addr),
         .o_rd_addr(dec_rd_addr),
@@ -217,7 +425,7 @@ module hart #(
 
     // Immediate generator
     imm imm_gen (
-        .i_inst(fetch_inst),
+        .i_inst(ifid_inst),
         .i_format(dec_imm_format),
         .o_immediate(immediate)
     );
@@ -232,27 +440,27 @@ module hart #(
         .o_rs1_rdata(rs1_data),
         .i_rs2_raddr(dec_rs2_addr),
         .o_rs2_rdata(rs2_data),
-        .i_rd_wen(reg_wen_final),
-        .i_rd_waddr(dec_rd_addr),
+        .i_rd_wen(memwb_reg_wen & ~memwb_trap),
+        .i_rd_waddr(memwb_rd_addr),
         .i_rd_wdata(wb_data)
     );
 
     // Execute stage
     execute EX (
-        .i_rs1_data(rs1_data),
-        .i_rs2_data(rs2_data),
-        .i_immediate(immediate),
-        .i_pc(fetch_pc),
-        .i_alu_op(dec_alu_op),
-        .i_alu_sub(dec_alu_sub),
-        .i_alu_unsigned(alu_unsigned_final),
-        .i_alu_arith(dec_alu_arith),
-        .i_alu_src(dec_alu_src),
-        .i_alu_pc(dec_alu_pc),
-        .i_branch(dec_branch),
-        .i_jump(dec_jump),
-        .i_is_jalr(dec_is_jalr),
-        .i_branch_op(dec_branch_op),
+        .i_rs1_data(idex_rs1_data),
+        .i_rs2_data(idex_rs2_data),
+        .i_immediate(idex_immediate),
+        .i_pc(idex_pc),
+        .i_alu_op(idex_alu_op),
+        .i_alu_sub(idex_alu_sub),
+        .i_alu_unsigned(idex_alu_unsigned),
+        .i_alu_arith(idex_alu_arith),
+        .i_alu_src(idex_alu_src),
+        .i_alu_pc(idex_alu_pc),
+        .i_branch(idex_branch),
+        .i_jump(idex_jump),
+        .i_is_jalr(idex_is_jalr),
+        .i_branch_op(idex_branch_op),
         .o_alu_result(exe_alu_result),
         .o_branch_target(exe_branch_target),
         .o_pc_set(exe_pc_set),
@@ -261,11 +469,11 @@ module hart #(
 
     // Memory stage
     memory MEM (
-        .i_addr(exe_alu_result),
-        .i_rs2_data(rs2_data),
-        .i_mem_ren(mem_ren_final),
-        .i_mem_wen(mem_wen_final),
-        .i_mem_op(dec_mem_op),
+        .i_addr(exmem_alu_result),
+        .i_rs2_data(exmem_rs2_data),
+        .i_mem_ren(exmem_mem_ren & ~exmem_trap),
+        .i_mem_wen(exmem_mem_wen & ~exmem_trap),
+        .i_mem_op(exmem_mem_op),
         .o_dmem_addr(o_dmem_addr),
         .o_dmem_ren(o_dmem_ren),
         .o_dmem_wen(o_dmem_wen),
@@ -278,28 +486,28 @@ module hart #(
 
     // Writeback stage
     writeback WB (
-        .i_wb_sel(dec_wb_sel),
-        .i_alu_result(exe_alu_result),
-        .i_mem_data(mem_load_data),
-        .i_pc_plus4(pc_plus4),
-        .i_immediate(immediate),
+        .i_wb_sel(memwb_wb_sel),
+        .i_alu_result(memwb_alu_result),
+        .i_mem_data(memwb_load_data),
+        .i_pc_plus4(memwb_pc_plus4),
+        .i_immediate(memwb_immediate),
         .o_wb_data(wb_data)
     );
 
     // Retire interface
     assign o_retire_valid = 1'b1;
-    assign o_retire_inst = fetch_inst;
-    assign o_retire_trap = trap;
-    assign o_retire_halt = dec_halt;
-    assign o_retire_pc = fetch_pc;
-    assign o_retire_next_pc  = (exe_pc_set & ~trap) ? exe_branch_target : pc_plus4;
+    assign o_retire_inst = memwb_inst;
+    assign o_retire_trap = memwb_trap;
+    assign o_retire_halt = memwb_halt;
+    assign o_retire_pc = memwb_pc;
+    assign o_retire_next_pc = (memwb_pc_set & ~memwb_trap) ? memwb_branch_target : memwb_pc_plus4;
 
-    assign o_retire_rs1_raddr = dec_uses_rs1 ? dec_rs1_addr : 5'd0;
-    assign o_retire_rs2_raddr = dec_uses_rs2 ? dec_rs2_addr : 5'd0;
-    assign o_retire_rs1_rdata = (o_retire_rs1_raddr == 5'd0) ? 32'd0 : rs1_data;
-    assign o_retire_rs2_rdata = (o_retire_rs2_raddr == 5'd0) ? 32'd0 : rs2_data;
+    assign o_retire_rs1_raddr = memwb_uses_rs1 ? memwb_rs1_addr : 5'd0;
+    assign o_retire_rs2_raddr = memwb_uses_rs2 ? memwb_rs2_addr : 5'd0;
+    assign o_retire_rs1_rdata = (o_retire_rs1_raddr == 5'd0) ? 32'd0 : memwb_rs1_data;
+    assign o_retire_rs2_rdata = (o_retire_rs2_raddr == 5'd0) ? 32'd0 : memwb_rs2_data;
 
-    assign o_retire_rd_waddr = reg_wen_final ? dec_rd_addr : 5'd0;
+    assign o_retire_rd_waddr = (memwb_reg_wen & ~memwb_trap) ? memwb_rd_addr : 5'd0;
     assign o_retire_rd_wdata = wb_data;
 
 endmodule
