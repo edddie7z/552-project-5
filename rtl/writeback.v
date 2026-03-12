@@ -1,7 +1,7 @@
 `default_nettype none
 
 module writeback (
-    input  ire [ 1:0] i_wb_sel,
+    input wire [ 1:0] i_wb_sel,
     input wire [31:0] i_alu_result,
     input wire [31:0] i_mem_data,
     input wire [31:0] i_pc_plus4,
