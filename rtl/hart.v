@@ -153,57 +153,57 @@ module hart #(
     // Register signals
 
     // IF/ID
-    reg        ifid_valid;
+    reg ifid_valid;
     reg [31:0] ifid_pc, ifid_inst;
 
     // ID/EX
-    reg        idex_valid;
+    reg idex_valid;
     reg [31:0] idex_pc, idex_inst;
-    reg [4:0]  idex_rs1_addr, idex_rs2_addr, idex_rd_addr;
+    reg [4:0] idex_rs1_addr, idex_rs2_addr, idex_rd_addr;
     reg [31:0] idex_rs1_data, idex_rs2_data;
     reg [31:0] idex_immediate;
-    reg [2:0]  idex_alu_op;
-    reg        idex_alu_sub, idex_alu_unsigned, idex_alu_arith;
-    reg        idex_alu_src, idex_alu_pc;
-    reg        idex_mem_ren, idex_mem_wen;
-    reg [2:0]  idex_mem_op;
-    reg [1:0]  idex_wb_sel;
-    reg        idex_reg_wen;
-    reg        idex_branch, idex_jump, idex_is_jalr;
-    reg [2:0]  idex_branch_op;
-    reg        idex_halt, idex_trap;
-    reg        idex_uses_rs1, idex_uses_rs2;
+    reg [2:0] idex_alu_op;
+    reg idex_alu_sub, idex_alu_unsigned, idex_alu_arith;
+    reg idex_alu_src, idex_alu_pc;
+    reg idex_mem_ren, idex_mem_wen;
+    reg [2:0] idex_mem_op;
+    reg [1:0] idex_wb_sel;
+    reg idex_reg_wen;
+    reg idex_branch, idex_jump, idex_is_jalr;
+    reg [2:0] idex_branch_op;
+    reg idex_halt, idex_trap;
+    reg idex_uses_rs1, idex_uses_rs2;
 
     // EX/MEM
-    reg        exmem_valid;
+    reg exmem_valid;
     reg [31:0] exmem_pc, exmem_inst;
     reg [31:0] exmem_alu_result, exmem_branch_target;
-    reg        exmem_pc_set;
-    reg [4:0]  exmem_rs1_addr, exmem_rs2_addr, exmem_rd_addr;
+    reg exmem_pc_set;
+    reg [4:0] exmem_rs1_addr, exmem_rs2_addr, exmem_rd_addr;
     reg [31:0] exmem_rs1_data, exmem_rs2_data;
     reg [31:0] exmem_immediate, exmem_pc_plus4;
-    reg        exmem_mem_ren, exmem_mem_wen;
-    reg [2:0]  exmem_mem_op;
-    reg [1:0]  exmem_wb_sel;
-    reg        exmem_reg_wen;
-    reg        exmem_halt, exmem_trap;
-    reg        exmem_uses_rs1, exmem_uses_rs2;
+    reg exmem_mem_ren, exmem_mem_wen;
+    reg [2:0] exmem_mem_op;
+    reg [1:0] exmem_wb_sel;
+    reg exmem_reg_wen;
+    reg exmem_halt, exmem_trap;
+    reg exmem_uses_rs1, exmem_uses_rs2;
 
     // MEM/WB
-    reg        memwb_valid;
+    reg memwb_valid;
     reg [31:0] memwb_pc, memwb_inst;
     reg [31:0] memwb_alu_result, memwb_load_data;
     reg [31:0] memwb_pc_plus4, memwb_immediate;
-    reg        memwb_pc_set;
+    reg memwb_pc_set;
     reg [31:0] memwb_branch_target;
-    reg [4:0]  memwb_rs1_addr, memwb_rs2_addr, memwb_rd_addr;
+    reg [4:0] memwb_rs1_addr, memwb_rs2_addr, memwb_rd_addr;
     reg [31:0] memwb_rs1_data, memwb_rs2_data;
-    reg [1:0]  memwb_wb_sel;
-    reg        memwb_reg_wen;
-    reg        memwb_halt, memwb_trap;
-    reg        memwb_uses_rs1, memwb_uses_rs2;
+    reg [1:0] memwb_wb_sel;
+    reg memwb_reg_wen;
+    reg memwb_halt, memwb_trap;
+    reg memwb_uses_rs1, memwb_uses_rs2;
     reg [31:0] memwb_dmem_addr;
-    reg        memwb_dmem_ren, memwb_dmem_wen;
+    reg memwb_dmem_ren, memwb_dmem_wen;
     reg [ 3:0] memwb_dmem_mask;
     reg [31:0] memwb_dmem_wdata, memwb_dmem_rdata;
 
@@ -247,9 +247,9 @@ module hart #(
     // Flush on taken branch/jump with aligned target
     wire flush = exe_pc_set & ~exe_target_misaligned;
 
-    
-    // Hazard Detection
+    // Hazard Detection (RAW)
 
+    // rs1/rs2 in IF/ID depends on rd in ID/EX 
     wire hazard_rs1_idex =
         ifid_valid &&
         dec_uses_rs1 &&
@@ -268,6 +268,7 @@ module hart #(
         (idex_rd_addr != 5'd0) &&
         (dec_rs2_addr == idex_rd_addr);
 
+    // rs1/rs2 in IF/ID depends on rd in EX/MEM 
     wire hazard_rs1_exmem =
         ifid_valid &&
         dec_uses_rs1 &&
@@ -286,6 +287,7 @@ module hart #(
         (exmem_rd_addr != 5'd0) &&
         (dec_rs2_addr == exmem_rd_addr);
 
+    // rs1/rs2 in IF/ID depends on rd in MEM/WB 
     wire hazard_rs1_memwb =
         ifid_valid &&
         dec_uses_rs1 &&
@@ -306,233 +308,234 @@ module hart #(
         (memwb_rd_addr != 5'd0) &&
         (dec_rs2_addr == memwb_rd_addr);
 
-    wire hazard_stall = hazard_rs1_idex  |
-                        hazard_rs2_idex  |
+    // Overall hazard stall signal
+    wire hazard_stall = hazard_rs1_idex |
+                        hazard_rs2_idex |
                         hazard_rs1_exmem |
                         hazard_rs2_exmem |
                         hazard_rs1_memwb |
                         hazard_rs2_memwb;
 
-    // IF/ID
+    // IF/ID pipeline register
     always @(posedge i_clk) begin
         if (i_rst) begin
             ifid_valid <= 1'b0;
-            ifid_pc    <= 32'd0;
-            ifid_inst  <= 32'h00000013; // nop
+            ifid_pc <= 32'd0;
+            ifid_inst <= 32'h00000013; // nop
         end else if (flush) begin
             ifid_valid <= 1'b0;
-            ifid_pc    <= 32'd0;
-            ifid_inst  <= 32'h00000013; // nop
+            ifid_pc <= 32'd0;
+            ifid_inst <= 32'h00000013; // nop
         end else if (hazard_stall) begin
             ifid_valid <= ifid_valid;   // hold
-            ifid_pc    <= ifid_pc;
-            ifid_inst  <= ifid_inst;
+            ifid_pc <= ifid_pc;
+            ifid_inst <= ifid_inst;
         end else begin
             ifid_valid <= 1'b1;
-            ifid_pc    <= fetch_pc;
-            ifid_inst  <= fetch_inst;
+            ifid_pc <= fetch_pc;
+            ifid_inst <= fetch_inst;
         end
     end
 
-    // ID/EX 
+    // ID/EX pipeline register
     always @(posedge i_clk) begin
         if (i_rst) begin
-            idex_valid        <= 1'b0;
-            idex_pc           <= 32'd0;
-            idex_inst         <= 32'h00000013;
-            idex_rs1_addr     <= 5'd0;
-            idex_rs2_addr     <= 5'd0;
-            idex_rd_addr      <= 5'd0;
-            idex_rs1_data     <= 32'd0;
-            idex_rs2_data     <= 32'd0;
-            idex_immediate    <= 32'd0;
-            idex_alu_op       <= 3'd0;
-            idex_alu_sub      <= 1'b0;
+            idex_valid <= 1'b0;
+            idex_pc <= 32'd0;
+            idex_inst <= 32'h00000013;
+            idex_rs1_addr <= 5'd0;
+            idex_rs2_addr <= 5'd0;
+            idex_rd_addr <= 5'd0;
+            idex_rs1_data <= 32'd0;
+            idex_rs2_data <= 32'd0;
+            idex_immediate <= 32'd0;
+            idex_alu_op <= 3'd0;
+            idex_alu_sub <= 1'b0;
             idex_alu_unsigned <= 1'b0;
-            idex_alu_arith    <= 1'b0;
-            idex_alu_src      <= 1'b0;
-            idex_alu_pc       <= 1'b0;
-            idex_mem_ren      <= 1'b0;
-            idex_mem_wen      <= 1'b0;
-            idex_mem_op       <= 3'd0;
-            idex_wb_sel       <= 2'd0;
-            idex_reg_wen      <= 1'b0;
-            idex_branch       <= 1'b0;
-            idex_jump         <= 1'b0;
-            idex_is_jalr      <= 1'b0;
-            idex_branch_op    <= 3'd0;
-            idex_halt         <= 1'b0;
-            idex_trap         <= 1'b0;
-            idex_uses_rs1     <= 1'b0;
-            idex_uses_rs2     <= 1'b0;
+            idex_alu_arith <= 1'b0;
+            idex_alu_src <= 1'b0;
+            idex_alu_pc <= 1'b0;
+            idex_mem_ren <= 1'b0;
+            idex_mem_wen <= 1'b0;
+            idex_mem_op <= 3'd0;
+            idex_wb_sel <= 2'd0;
+            idex_reg_wen <= 1'b0;
+            idex_branch <= 1'b0;
+            idex_jump <= 1'b0;
+            idex_is_jalr <= 1'b0;
+            idex_branch_op <= 3'd0;
+            idex_halt <= 1'b0;
+            idex_trap <= 1'b0;
+            idex_uses_rs1 <= 1'b0;
+            idex_uses_rs2 <= 1'b0;
         end else if (flush || hazard_stall) begin
-            idex_valid        <= 1'b0;
-            idex_pc           <= 32'd0;
-            idex_inst         <= 32'h00000013;
-            idex_rs1_addr     <= 5'd0;
-            idex_rs2_addr     <= 5'd0;
-            idex_rd_addr      <= 5'd0;
-            idex_rs1_data     <= 32'd0;
-            idex_rs2_data     <= 32'd0;
-            idex_immediate    <= 32'd0;
-            idex_alu_op       <= 3'd0;
-            idex_alu_sub      <= 1'b0;
+            idex_valid <= 1'b0;
+            idex_pc <= 32'd0;
+            idex_inst <= 32'h00000013;
+            idex_rs1_addr <= 5'd0;
+            idex_rs2_addr <= 5'd0;
+            idex_rd_addr <= 5'd0;
+            idex_rs1_data <= 32'd0;
+            idex_rs2_data <= 32'd0;
+            idex_immediate <= 32'd0;
+            idex_alu_op <= 3'd0;
+            idex_alu_sub <= 1'b0;
             idex_alu_unsigned <= 1'b0;
-            idex_alu_arith    <= 1'b0;
-            idex_alu_src      <= 1'b0;
-            idex_alu_pc       <= 1'b0;
-            idex_mem_ren      <= 1'b0;
-            idex_mem_wen      <= 1'b0;
-            idex_mem_op       <= 3'd0;
-            idex_wb_sel       <= 2'd0;
-            idex_reg_wen      <= 1'b0;
-            idex_branch       <= 1'b0;
-            idex_jump         <= 1'b0;
-            idex_is_jalr      <= 1'b0;
-            idex_branch_op    <= 3'd0;
-            idex_halt         <= 1'b0;
-            idex_trap         <= 1'b0;
-            idex_uses_rs1     <= 1'b0;
-            idex_uses_rs2     <= 1'b0;
+            idex_alu_arith <= 1'b0;
+            idex_alu_src <= 1'b0;
+            idex_alu_pc <= 1'b0;
+            idex_mem_ren <= 1'b0;
+            idex_mem_wen <= 1'b0;
+            idex_mem_op <= 3'd0;
+            idex_wb_sel <= 2'd0;
+            idex_reg_wen <= 1'b0;
+            idex_branch <= 1'b0;
+            idex_jump <= 1'b0;
+            idex_is_jalr <= 1'b0;
+            idex_branch_op <= 3'd0;
+            idex_halt <= 1'b0;
+            idex_trap <= 1'b0;
+            idex_uses_rs1 <= 1'b0;
+            idex_uses_rs2 <= 1'b0;
         end else begin
-            idex_valid        <= ifid_valid;
-            idex_pc           <= ifid_pc;
-            idex_inst         <= ifid_inst;
-            idex_rs1_addr     <= dec_rs1_addr;
-            idex_rs2_addr     <= dec_rs2_addr;
-            idex_rd_addr      <= dec_rd_addr;
-            idex_rs1_data     <= rs1_data;
-            idex_rs2_data     <= rs2_data;
-            idex_immediate    <= immediate;
-            idex_alu_op       <= dec_alu_op;
-            idex_alu_sub      <= dec_alu_sub;
+            idex_valid <= ifid_valid;
+            idex_pc <= ifid_pc;
+            idex_inst <= ifid_inst;
+            idex_rs1_addr <= dec_rs1_addr;
+            idex_rs2_addr <= dec_rs2_addr;
+            idex_rd_addr <= dec_rd_addr;
+            idex_rs1_data <= rs1_data;
+            idex_rs2_data <= rs2_data;
+            idex_immediate <= immediate;
+            idex_alu_op <= dec_alu_op;
+            idex_alu_sub <= dec_alu_sub;
             idex_alu_unsigned <= alu_unsigned_final;
-            idex_alu_arith    <= dec_alu_arith;
-            idex_alu_src      <= dec_alu_src;
-            idex_alu_pc       <= dec_alu_pc;
-            idex_mem_ren      <= dec_mem_ren;
-            idex_mem_wen      <= dec_mem_wen;
-            idex_mem_op       <= dec_mem_op;
-            idex_wb_sel       <= dec_wb_sel;
-            idex_reg_wen      <= dec_reg_wen;
-            idex_branch       <= dec_branch;
-            idex_jump         <= dec_jump;
-            idex_is_jalr      <= dec_is_jalr;
-            idex_branch_op    <= dec_branch_op;
-            idex_halt         <= dec_halt;
-            idex_trap         <= dec_trap;
-            idex_uses_rs1     <= dec_uses_rs1;
-            idex_uses_rs2     <= dec_uses_rs2;
+            idex_alu_arith <= dec_alu_arith;
+            idex_alu_src <= dec_alu_src;
+            idex_alu_pc <= dec_alu_pc;
+            idex_mem_ren <= dec_mem_ren;
+            idex_mem_wen <= dec_mem_wen;
+            idex_mem_op <= dec_mem_op;
+            idex_wb_sel <= dec_wb_sel;
+            idex_reg_wen <= dec_reg_wen;
+            idex_branch <= dec_branch;
+            idex_jump <= dec_jump;
+            idex_is_jalr <= dec_is_jalr;
+            idex_branch_op <= dec_branch_op;
+            idex_halt <= dec_halt;
+            idex_trap <= dec_trap;
+            idex_uses_rs1 <= dec_uses_rs1;
+            idex_uses_rs2 <= dec_uses_rs2;
         end
     end
 
-    // EX/MEM
+    // EX/MEM pipeline register
     always @(posedge i_clk) begin
         if (i_rst) begin
-            exmem_valid         <= 1'b0;
-            exmem_pc            <= 32'd0;
-            exmem_inst          <= 32'h00000013;
-            exmem_alu_result    <= 32'd0;
+            exmem_valid <= 1'b0;
+            exmem_pc <= 32'd0;
+            exmem_inst <= 32'h00000013;
+            exmem_alu_result <= 32'd0;
             exmem_branch_target <= 32'd0;
-            exmem_pc_set        <= 1'b0;
-            exmem_rs1_addr      <= 5'd0;
-            exmem_rs2_addr      <= 5'd0;
-            exmem_rd_addr       <= 5'd0;
-            exmem_rs1_data      <= 32'd0;
-            exmem_rs2_data      <= 32'd0;
-            exmem_immediate     <= 32'd0;
-            exmem_pc_plus4      <= 32'd0;
-            exmem_mem_ren       <= 1'b0;
-            exmem_mem_wen       <= 1'b0;
-            exmem_mem_op        <= 3'd0;
-            exmem_wb_sel        <= 2'd0;
-            exmem_reg_wen       <= 1'b0;
-            exmem_halt          <= 1'b0;
-            exmem_trap          <= 1'b0;
-            exmem_uses_rs1      <= 1'b0;
-            exmem_uses_rs2      <= 1'b0;
+            exmem_pc_set <= 1'b0;
+            exmem_rs1_addr <= 5'd0;
+            exmem_rs2_addr <= 5'd0;
+            exmem_rd_addr <= 5'd0;
+            exmem_rs1_data <= 32'd0;
+            exmem_rs2_data <= 32'd0;
+            exmem_immediate <= 32'd0;
+            exmem_pc_plus4 <= 32'd0;
+            exmem_mem_ren <= 1'b0;
+            exmem_mem_wen <= 1'b0;
+            exmem_mem_op <= 3'd0;
+            exmem_wb_sel <= 2'd0;
+            exmem_reg_wen <= 1'b0;
+            exmem_halt <= 1'b0;
+            exmem_trap <= 1'b0;
+            exmem_uses_rs1 <= 1'b0;
+            exmem_uses_rs2 <= 1'b0;
         end else begin
-            exmem_valid         <= idex_valid;
-            exmem_pc            <= idex_pc;
-            exmem_inst          <= idex_inst;
-            exmem_alu_result    <= exe_alu_result;
+            exmem_valid <= idex_valid;
+            exmem_pc <= idex_pc;
+            exmem_inst <= idex_inst;
+            exmem_alu_result <= exe_alu_result;
             exmem_branch_target <= exe_branch_target;
-            exmem_pc_set        <= exe_pc_set;
-            exmem_rs1_addr      <= idex_rs1_addr;
-            exmem_rs2_addr      <= idex_rs2_addr;
-            exmem_rd_addr       <= idex_rd_addr;
-            exmem_rs1_data      <= idex_rs1_data;
-            exmem_rs2_data      <= idex_rs2_data;
-            exmem_immediate     <= idex_immediate;
-            exmem_pc_plus4      <= idex_pc + 32'd4;
-            exmem_mem_ren       <= idex_mem_ren;
-            exmem_mem_wen       <= idex_mem_wen;
-            exmem_mem_op        <= idex_mem_op;
-            exmem_wb_sel        <= idex_wb_sel;
-            exmem_reg_wen       <= idex_reg_wen;
-            exmem_halt          <= idex_halt;
-            exmem_trap          <= idex_trap | (exe_pc_set & exe_target_misaligned);
-            exmem_uses_rs1      <= idex_uses_rs1;
-            exmem_uses_rs2      <= idex_uses_rs2;
+            exmem_pc_set <= exe_pc_set;
+            exmem_rs1_addr <= idex_rs1_addr;
+            exmem_rs2_addr <= idex_rs2_addr;
+            exmem_rd_addr <= idex_rd_addr;
+            exmem_rs1_data <= idex_rs1_data;
+            exmem_rs2_data <= idex_rs2_data;
+            exmem_immediate <= idex_immediate;
+            exmem_pc_plus4 <= idex_pc + 32'd4;
+            exmem_mem_ren <= idex_mem_ren;
+            exmem_mem_wen <= idex_mem_wen;
+            exmem_mem_op <= idex_mem_op;
+            exmem_wb_sel <= idex_wb_sel;
+            exmem_reg_wen <= idex_reg_wen;
+            exmem_halt <= idex_halt;
+            exmem_trap <= idex_trap | (exe_pc_set & exe_target_misaligned);
+            exmem_uses_rs1 <= idex_uses_rs1;
+            exmem_uses_rs2 <= idex_uses_rs2;
         end
     end
 
-    // MEM/WB
+    // MEM/WB pipeline register
     always @(posedge i_clk) begin
         if (i_rst) begin
-            memwb_valid         <= 1'b0;
-            memwb_pc            <= 32'd0;
-            memwb_inst          <= 32'h00000013;
-            memwb_alu_result    <= 32'd0;
-            memwb_load_data     <= 32'd0;
-            memwb_pc_plus4      <= 32'd0;
-            memwb_immediate     <= 32'd0;
-            memwb_pc_set        <= 1'b0;
+            memwb_valid <= 1'b0;
+            memwb_pc <= 32'd0;
+            memwb_inst <= 32'h00000013;
+            memwb_alu_result <= 32'd0;
+            memwb_load_data <= 32'd0;
+            memwb_pc_plus4 <= 32'd0;
+            memwb_immediate <= 32'd0;
+            memwb_pc_set <= 1'b0;
             memwb_branch_target <= 32'd0;
-            memwb_rs1_addr      <= 5'd0;
-            memwb_rs2_addr      <= 5'd0;
-            memwb_rd_addr       <= 5'd0;
-            memwb_rs1_data      <= 32'd0;
-            memwb_rs2_data      <= 32'd0;
-            memwb_wb_sel        <= 2'd0;
-            memwb_reg_wen       <= 1'b0;
-            memwb_halt          <= 1'b0;
-            memwb_trap          <= 1'b0;
-            memwb_uses_rs1      <= 1'b0;
-            memwb_uses_rs2      <= 1'b0;
-            memwb_dmem_addr     <= 32'd0;
-            memwb_dmem_ren      <= 1'b0;
-            memwb_dmem_wen      <= 1'b0;
-            memwb_dmem_mask     <= 4'd0;
-            memwb_dmem_wdata    <= 32'd0;
-            memwb_dmem_rdata    <= 32'd0;
+            memwb_rs1_addr <= 5'd0;
+            memwb_rs2_addr <= 5'd0;
+            memwb_rd_addr <= 5'd0;
+            memwb_rs1_data <= 32'd0;
+            memwb_rs2_data <= 32'd0;
+            memwb_wb_sel <= 2'd0;
+            memwb_reg_wen <= 1'b0;
+            memwb_halt <= 1'b0;
+            memwb_trap <= 1'b0;
+            memwb_uses_rs1 <= 1'b0;
+            memwb_uses_rs2 <= 1'b0;
+            memwb_dmem_addr <= 32'd0;
+            memwb_dmem_ren <= 1'b0;
+            memwb_dmem_wen <= 1'b0;
+            memwb_dmem_mask <= 4'd0;
+            memwb_dmem_wdata <= 32'd0;
+            memwb_dmem_rdata <= 32'd0;
         end else begin
-            memwb_valid         <= exmem_valid;
-            memwb_pc            <= exmem_pc;
-            memwb_inst          <= exmem_inst;
-            memwb_alu_result    <= exmem_alu_result;
-            memwb_load_data     <= mem_load_data;
-            memwb_pc_plus4      <= exmem_pc_plus4;
-            memwb_immediate     <= exmem_immediate;
-            memwb_pc_set        <= exmem_pc_set;
+            memwb_valid <= exmem_valid;
+            memwb_pc <= exmem_pc;
+            memwb_inst <= exmem_inst;
+            memwb_alu_result <= exmem_alu_result;
+            memwb_load_data <= mem_load_data;
+            memwb_pc_plus4 <= exmem_pc_plus4;
+            memwb_immediate <= exmem_immediate;
+            memwb_pc_set <= exmem_pc_set;
             memwb_branch_target <= exmem_branch_target;
-            memwb_rs1_addr      <= exmem_rs1_addr;
-            memwb_rs2_addr      <= exmem_rs2_addr;
-            memwb_rd_addr       <= exmem_rd_addr;
-            memwb_rs1_data      <= exmem_rs1_data;
-            memwb_rs2_data      <= exmem_rs2_data;
-            memwb_wb_sel        <= exmem_wb_sel;
-            memwb_reg_wen       <= exmem_reg_wen;
-            memwb_halt          <= exmem_halt;
-            memwb_trap          <= exmem_trap | mem_misaligned;
-            memwb_uses_rs1      <= exmem_uses_rs1;
-            memwb_uses_rs2      <= exmem_uses_rs2;
-            memwb_dmem_addr     <= o_dmem_addr;
-            memwb_dmem_ren      <= exmem_valid & exmem_mem_ren & ~exmem_trap;
-            memwb_dmem_wen      <= exmem_valid & exmem_mem_wen & ~exmem_trap;
-            memwb_dmem_mask     <= o_dmem_mask;
-            memwb_dmem_wdata    <= o_dmem_wdata;
-            memwb_dmem_rdata    <= i_dmem_rdata;
+            memwb_rs1_addr <= exmem_rs1_addr;
+            memwb_rs2_addr <= exmem_rs2_addr;
+            memwb_rd_addr <= exmem_rd_addr;
+            memwb_rs1_data <= exmem_rs1_data;
+            memwb_rs2_data <= exmem_rs2_data;
+            memwb_wb_sel <= exmem_wb_sel;
+            memwb_reg_wen <= exmem_reg_wen;
+            memwb_halt <= exmem_halt;
+            memwb_trap <= exmem_trap | mem_misaligned;
+            memwb_uses_rs1 <= exmem_uses_rs1;
+            memwb_uses_rs2 <= exmem_uses_rs2;
+            memwb_dmem_addr <= o_dmem_addr;
+            memwb_dmem_ren <= exmem_valid & exmem_mem_ren & ~exmem_trap;
+            memwb_dmem_wen <= exmem_valid & exmem_mem_wen & ~exmem_trap;
+            memwb_dmem_mask <= o_dmem_mask;
+            memwb_dmem_wdata <= o_dmem_wdata;
+            memwb_dmem_rdata <= i_dmem_rdata;
         end
     end
 
@@ -595,7 +598,7 @@ module hart #(
         .o_rs1_rdata(rs1_data),
         .i_rs2_raddr(dec_rs2_addr),
         .o_rs2_rdata(rs2_data),
-        .i_rd_wen(memwb_valid & memwb_reg_wen & ~memwb_trap),   // <--- gate with valid
+        .i_rd_wen(memwb_valid & memwb_reg_wen & ~memwb_trap),   // gate with valid
         .i_rd_waddr(memwb_rd_addr),
         .i_rd_wdata(wb_data)
     );
@@ -650,11 +653,11 @@ module hart #(
     );
 
     // Retire interface
-    assign o_retire_valid   = memwb_valid;
-    assign o_retire_inst    = memwb_inst;
-    assign o_retire_trap    = memwb_trap;
-    assign o_retire_halt    = memwb_halt;
-    assign o_retire_pc      = memwb_pc;
+    assign o_retire_valid = memwb_valid;
+    assign o_retire_inst = memwb_inst;
+    assign o_retire_trap = memwb_trap;
+    assign o_retire_halt = memwb_halt;
+    assign o_retire_pc = memwb_pc;
     assign o_retire_next_pc = (memwb_pc_set & ~memwb_trap) ? memwb_branch_target
                                                            : memwb_pc_plus4;
 
@@ -663,13 +666,13 @@ module hart #(
     assign o_retire_rs1_rdata = (o_retire_rs1_raddr == 5'd0) ? 32'd0 : memwb_rs1_data;
     assign o_retire_rs2_rdata = (o_retire_rs2_raddr == 5'd0) ? 32'd0 : memwb_rs2_data;
 
-    assign o_retire_rd_waddr  = (memwb_valid && memwb_reg_wen && ~memwb_trap) ? memwb_rd_addr : 5'd0;
-    assign o_retire_rd_wdata  = wb_data;
+    assign o_retire_rd_waddr = (memwb_valid && memwb_reg_wen && ~memwb_trap) ? memwb_rd_addr : 5'd0;
+    assign o_retire_rd_wdata = wb_data;
 
-    assign o_retire_dmem_addr  = memwb_dmem_addr;
-    assign o_retire_dmem_ren   = memwb_valid ? memwb_dmem_ren   : 1'b0;
-    assign o_retire_dmem_wen   = memwb_valid ? memwb_dmem_wen   : 1'b0;
-    assign o_retire_dmem_mask  = memwb_valid ? memwb_dmem_mask  : 4'd0;
+    assign o_retire_dmem_addr = memwb_dmem_addr;
+    assign o_retire_dmem_ren = memwb_valid ? memwb_dmem_ren : 1'b0;
+    assign o_retire_dmem_wen = memwb_valid ? memwb_dmem_wen : 1'b0;
+    assign o_retire_dmem_mask = memwb_valid ? memwb_dmem_mask : 4'd0;
     assign o_retire_dmem_wdata = memwb_valid ? memwb_dmem_wdata : 32'd0;
     assign o_retire_dmem_rdata = memwb_valid ? memwb_dmem_rdata : 32'd0;
 endmodule
