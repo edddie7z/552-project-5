@@ -181,6 +181,7 @@ module hart #(
     reg exmem_pc_set;
     reg [4:0] exmem_rs1_addr, exmem_rs2_addr, exmem_rd_addr;
     reg [31:0] exmem_rs1_data, exmem_rs2_data;
+    reg [31:0] exmem_store_data;
     reg [31:0] exmem_immediate, exmem_pc_plus4;
     reg exmem_mem_ren, exmem_mem_wen;
     reg [2:0] exmem_mem_op;
@@ -264,6 +265,7 @@ module hart #(
     wire hazard_rs2_idex =
         ifid_valid &&
         dec_uses_rs2 &&
+        ~dec_mem_wen &&
         (dec_rs2_addr != 5'd0) &&
         idex_valid &&
         idex_mem_ren &&
@@ -331,6 +333,19 @@ module hart #(
     wire [31:0] ex_rs2_data = ex_fwd_rs2_exmem ? exmem_wb_data_noload :
                               ex_fwd_rs2_memwb ? wb_data :
                               idex_rs2_data;
+
+    // Store data forwarding at MEM stage
+    wire mem_fwd_store_memwb =
+        exmem_valid &&
+        exmem_mem_wen &&
+        (exmem_rs2_addr != 5'd0) &&
+        memwb_valid &&
+        memwb_reg_wen &&
+        ~memwb_trap &&
+        (memwb_rd_addr != 5'd0) &&
+        (exmem_rs2_addr == memwb_rd_addr);
+
+    wire [31:0] mem_store_data = mem_fwd_store_memwb ? wb_data : exmem_store_data;
 
     // IF/ID pipeline register
     always @(posedge i_clk) begin
@@ -459,6 +474,7 @@ module hart #(
             exmem_rd_addr <= 5'd0;
             exmem_rs1_data <= 32'd0;
             exmem_rs2_data <= 32'd0;
+            exmem_store_data <= 32'd0;
             exmem_immediate <= 32'd0;
             exmem_pc_plus4 <= 32'd0;
             exmem_mem_ren <= 1'b0;
@@ -482,6 +498,7 @@ module hart #(
             exmem_rd_addr <= idex_rd_addr;
             exmem_rs1_data <= idex_rs1_data;
             exmem_rs2_data <= idex_rs2_data;
+            exmem_store_data <= ex_rs2_data;
             exmem_immediate <= idex_immediate;
             exmem_pc_plus4 <= idex_pc + 32'd4;
             exmem_mem_ren <= idex_mem_ren;
@@ -644,7 +661,7 @@ module hart #(
     // Memory stage
     memory MEM (
         .i_addr(exmem_alu_result),
-        .i_rs2_data(exmem_rs2_data),
+        .i_rs2_data(mem_store_data),
         .i_mem_ren(exmem_valid & exmem_mem_ren & ~exmem_trap),
         .i_mem_wen(exmem_valid & exmem_mem_wen & ~exmem_trap),
         .i_mem_op(exmem_mem_op),
