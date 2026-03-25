@@ -244,8 +244,10 @@ module hart #(
     // BLTU/BGEU (funct3[1]=1), read from IF/ID reg
     wire alu_unsigned_final = dec_alu_unsigned | (dec_branch & ifid_inst[13]);
 
-    // Flush on taken branch/jump with aligned target
-    wire flush = exe_pc_set & ~exe_target_misaligned;
+    // Branches predict not taken
+    // Redirect PC and flush younger instructions when EX resolves taken branch/jump
+    wire pc_redirect = exe_pc_set & ~exe_target_misaligned;
+    wire flush = pc_redirect;
 
     // Hazard Detection (RAW)
 
@@ -255,7 +257,7 @@ module hart #(
         dec_uses_rs1 &&
         (dec_rs1_addr != 5'd0) &&
         idex_valid &&
-        idex_reg_wen &&
+        idex_mem_ren &&
         (idex_rd_addr != 5'd0) &&
         (dec_rs1_addr == idex_rd_addr);
 
@@ -264,57 +266,71 @@ module hart #(
         dec_uses_rs2 &&
         (dec_rs2_addr != 5'd0) &&
         idex_valid &&
-        idex_reg_wen &&
+        idex_mem_ren &&
         (idex_rd_addr != 5'd0) &&
         (dec_rs2_addr == idex_rd_addr);
 
-    // rs1/rs2 in IF/ID depends on rd in EX/MEM 
-    wire hazard_rs1_exmem =
-        ifid_valid &&
-        dec_uses_rs1 &&
-        (dec_rs1_addr != 5'd0) &&
-        exmem_valid &&
-        exmem_reg_wen &&
-        (exmem_rd_addr != 5'd0) &&
-        (dec_rs1_addr == exmem_rd_addr);
-
-    wire hazard_rs2_exmem =
-        ifid_valid &&
-        dec_uses_rs2 &&
-        (dec_rs2_addr != 5'd0) &&
-        exmem_valid &&
-        exmem_reg_wen &&
-        (exmem_rd_addr != 5'd0) &&
-        (dec_rs2_addr == exmem_rd_addr);
-
-    // rs1/rs2 in IF/ID depends on rd in MEM/WB 
-    wire hazard_rs1_memwb =
-        ifid_valid &&
-        dec_uses_rs1 &&
-        (dec_rs1_addr != 5'd0) &&
-        memwb_valid &&
-        memwb_reg_wen &&
-        ~memwb_trap &&
-        (memwb_rd_addr != 5'd0) &&
-        (dec_rs1_addr == memwb_rd_addr);
-
-    wire hazard_rs2_memwb =
-        ifid_valid &&
-        dec_uses_rs2 &&
-        (dec_rs2_addr != 5'd0) &&
-        memwb_valid &&
-        memwb_reg_wen &&
-        ~memwb_trap &&
-        (memwb_rd_addr != 5'd0) &&
-        (dec_rs2_addr == memwb_rd_addr);
-
     // Overall hazard stall signal
+    // With EX/EX and MEMEX forwarding, only load use from ID/EX stalls
     wire hazard_stall = hazard_rs1_idex |
-                        hazard_rs2_idex |
-                        hazard_rs1_exmem |
-                        hazard_rs2_exmem |
-                        hazard_rs1_memwb |
-                        hazard_rs2_memwb;
+                        hazard_rs2_idex;
+
+    // EX/EX forwarding val for non loading instructions
+    wire [31:0] exmem_wb_data_noload =
+        (exmem_wb_sel == 2'b10) ? exmem_pc_plus4 :
+        (exmem_wb_sel == 2'b11) ? exmem_immediate :
+                                  exmem_alu_result;
+
+    wire ex_fwd_rs1_exmem =
+        idex_valid &&
+        idex_uses_rs1 &&
+        (idex_rs1_addr != 5'd0) &&
+        exmem_valid &&
+        exmem_reg_wen &&
+        ~exmem_trap &&
+        ~exmem_mem_ren &&
+        (exmem_rd_addr != 5'd0) &&
+        (idex_rs1_addr == exmem_rd_addr);
+
+    wire ex_fwd_rs2_exmem =
+        idex_valid &&
+        idex_uses_rs2 &&
+        (idex_rs2_addr != 5'd0) &&
+        exmem_valid &&
+        exmem_reg_wen &&
+        ~exmem_trap &&
+        ~exmem_mem_ren &&
+        (exmem_rd_addr != 5'd0) &&
+        (idex_rs2_addr == exmem_rd_addr);
+
+    wire ex_fwd_rs1_memwb =
+        idex_valid &&
+        idex_uses_rs1 &&
+        (idex_rs1_addr != 5'd0) &&
+        memwb_valid &&
+        memwb_reg_wen &&
+        ~memwb_trap &&
+        (memwb_rd_addr != 5'd0) &&
+        (idex_rs1_addr == memwb_rd_addr) &&
+        ~ex_fwd_rs1_exmem;
+
+    wire ex_fwd_rs2_memwb =
+        idex_valid &&
+        idex_uses_rs2 &&
+        (idex_rs2_addr != 5'd0) &&
+        memwb_valid &&
+        memwb_reg_wen &&
+        ~memwb_trap &&
+        (memwb_rd_addr != 5'd0) &&
+        (idex_rs2_addr == memwb_rd_addr) &&
+        ~ex_fwd_rs2_exmem;
+
+    wire [31:0] ex_rs1_data = ex_fwd_rs1_exmem ? exmem_wb_data_noload :
+                              ex_fwd_rs1_memwb ? wb_data :
+                              idex_rs1_data;
+    wire [31:0] ex_rs2_data = ex_fwd_rs2_exmem ? exmem_wb_data_noload :
+                              ex_fwd_rs2_memwb ? wb_data :
+                              idex_rs2_data;
 
     // IF/ID pipeline register
     always @(posedge i_clk) begin
@@ -546,7 +562,7 @@ module hart #(
         .i_clk(i_clk),
         .i_rst(i_rst),
         .i_stall(hazard_stall),
-        .i_pc_set(exe_pc_set & ~exe_target_misaligned),
+        .i_pc_set(pc_redirect),
         .i_pc_next(exe_branch_target),
         .o_imem_raddr(o_imem_raddr),
         .i_imem_rdata(i_imem_rdata),
@@ -605,8 +621,8 @@ module hart #(
 
     // Execute
     execute EX (
-        .i_rs1_data(idex_rs1_data),
-        .i_rs2_data(idex_rs2_data),
+        .i_rs1_data(ex_rs1_data),
+        .i_rs2_data(ex_rs2_data),
         .i_immediate(idex_immediate),
         .i_pc(idex_pc),
         .i_alu_op(idex_alu_op),
