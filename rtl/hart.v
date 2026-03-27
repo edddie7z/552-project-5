@@ -496,8 +496,8 @@ module hart #(
             exmem_rs1_addr <= idex_rs1_addr;
             exmem_rs2_addr <= idex_rs2_addr;
             exmem_rd_addr <= idex_rd_addr;
-            exmem_rs1_data <= idex_rs1_data;
-            exmem_rs2_data <= idex_rs2_data;
+            exmem_rs1_data <= ex_rs1_data;
+            exmem_rs2_data <= ex_rs2_data;
             exmem_store_data <= ex_rs2_data;
             exmem_immediate <= idex_immediate;
             exmem_pc_plus4 <= idex_pc + 32'd4;
